@@ -1,21 +1,21 @@
 # kreadoai-mcp-skills
 
-> [English README](./README.en.md)
+KreadoAI AIGC MCP integration guide. This document is based on the 20 tools currently exposed by the **aigc-agent-art** MCP server. Use it to integrate KreadoAI image generation, ad creatives, video, digital human, TTS, and related capabilities in MCP-compatible clients such as Cursor and Claude Desktop.
 
-KreadoAI AIGC 能力 MCP 接入文档。本文档基于 MCP 服务 **aigc-agent-art** 当前暴露的 20 个工具编写，适用于在 Cursor、Claude Desktop 等支持 MCP 的客户端中接入 KreadoAI 生图、广告创意、视频、数字人、TTS 等能力。
+> [中文版 README](./README.md)
 
-## 服务概览
+## Overview
 
-| 项目 | 说明 |
-|------|------|
-| 服务名称 | `aigc-agent-art` |
-| 能力范围 | AI 生图、广告创意多尺寸、URL 广告图、图/文生视频、网页采集、数字人唇形合成、TTS、字幕/水印擦除 |
-| 计费 | 部分能力消耗 K 币；可通过 `get_my_user_detail` 查询余额与配额 |
-| 鉴权 | 依赖会话用户上下文，无需传入 `userId`；仅能操作当前登录用户自己的任务 |
+| Item | Description |
+|------|-------------|
+| Server name | `aigc-agent-art` |
+| Capabilities | AI image generation, multi-size ad creatives, URL-based ad images, image/text-to-video, web crawling, digital human lip-sync, TTS, subtitle/watermark removal |
+| Billing | Some capabilities consume K Coins; check balance and quotas via `get_my_user_detail` |
+| Authentication | Relies on session user context; no `userId` parameter required; only the current logged-in user's tasks can be accessed |
 
-## 在 Cursor 中接入
+## Connect in Cursor
 
-在 Cursor 的 MCP 配置（`Settings → MCP`，或项目/用户级 `mcp.json`）中添加服务。具体连接地址与鉴权方式以 KreadoAI 官方提供的 MCP 接入信息为准，示例：
+Add the server in Cursor MCP settings (`Settings → MCP`, or project/user-level `mcp.json`). Use the connection URL and auth details provided by KreadoAI. Example:
 
 ```json
 {
@@ -30,95 +30,95 @@ KreadoAI AIGC 能力 MCP 接入文档。本文档基于 MCP 服务 **aigc-agent-
 }
 ```
 
-配置完成后重启 Cursor，在 Agent 对话中即可调用本服务工具。工具列表以 MCP 客户端实际同步结果为准。
+Restart Cursor after configuration. Tools become available in Agent conversations. The actual tool list is determined by what your MCP client syncs from the server.
 
-## 通用约定
+## Common Conventions
 
-### 异步任务模式
+### Async Task Pattern
 
-多数生成类接口为**提交 + 轮询**模式：
+Most generation APIs follow a **submit + poll** pattern:
 
-1. 调用 `submit_*` 提交任务，获得 `taskId` / `jobId` / `threadId`
-2. 周期性调用对应的 `get_*` / `batch_get_*` 查询结果
-3. 根据状态字段判断是否完成
+1. Call `submit_*` to submit a task and receive `taskId` / `jobId` / `threadId`
+2. Periodically call the corresponding `get_*` / `batch_get_*` to fetch results
+3. Check status fields to determine completion
 
-### 任务状态码
+### Task Status Codes
 
-| 场景 | 状态值 | 含义 |
-|------|--------|------|
-| 生图 / 广告图 / URL2Image | 1 / 2 / 3 / 4 | 等待 / 执行中 / 成功 / 失败 |
-| 图生视频 | 1 / 2 / 3 / 4 | 等待 / 成功 / 失败（见各工具说明） |
-| 数字人 / 字幕擦除 | 1 / 2 / 3 / 4 / 5 | 等待 / 执行中 / 成功 / 失败 / 超时 |
-| 网页采集 | RUNNING / SUCCESS / FAILED / NOT_FOUND | 执行中 / 成功 / 失败 / 不存在或已过期（TTL 24h） |
+| Scenario | Status values | Meaning |
+|----------|---------------|---------|
+| Image gen / ad images / URL2Image | 1 / 2 / 3 / 4 | Pending / Running / Success / Failed |
+| Image-to-video | 1 / 2 / 3 / 4 | Pending / Success / Failed (see per-tool docs) |
+| Digital human / subtitle removal | 1 / 2 / 3 / 4 / 5 | Pending / Running / Success / Failed / Timeout |
+| Web crawl | RUNNING / SUCCESS / FAILED / NOT_FOUND | Running / Success / Failed / Not found or expired (TTL 24h) |
 
-### 文件入参结构（fileUrlList / imageInput 等）
+### File Input Structure (fileUrlList / imageInput, etc.)
 
-上传或引用文件时，常用对象字段：
+Common fields when uploading or referencing files:
 
-| 字段 | 说明 |
-|------|------|
-| `fileSource` | `1`=平台已上传文件（需 `fileId`）；`2`=三方 URL（需 `fileUrl`）；`3`=base64（需 `fileUrl`） |
-| `fileId` | 平台文件 ID |
-| `fileUrl` | 文件 URL 或 base64 内容 |
-| `fileName` | 文件名，建议有意义的命名 |
-| `thumbnailFileUrl` | 缩略图 URL |
+| Field | Description |
+|-------|-------------|
+| `fileSource` | `1` = platform-uploaded file (requires `fileId`); `2` = third-party URL (requires `fileUrl`); `3` = base64 (requires `fileUrl`) |
+| `fileId` | Platform file ID |
+| `fileUrl` | File URL or base64 content |
+| `fileName` | File name; use a meaningful name when possible |
+| `thumbnailFileUrl` | Thumbnail URL |
 
-### 轮询建议
+### Polling Recommendations
 
-| 任务类型 | 建议间隔 | 最长等待 |
-|----------|----------|----------|
-| 网页采集 | 10–15 秒 | 15 分钟 |
-| 图/文生视频 | 10–30 秒 | 视模型而定 |
-| 生图 / 广告图 | 5–15 秒 | 视任务复杂度而定 |
-| 数字人 / 字幕擦除 | 10–30 秒 | 视队列而定 |
+| Task type | Recommended interval | Max wait |
+|-----------|---------------------|----------|
+| Web crawl | 10–15 seconds | 15 minutes |
+| Image/text-to-video | 10–30 seconds | Depends on model |
+| Image / ad generation | 5–15 seconds | Depends on complexity |
+| Digital human / subtitle removal | 10–30 seconds | Depends on queue |
 
-### 限流提示
+### Rate Limits
 
-- `text_to_speech`：同一秒内仅允许 1 次请求
-- `submit_system_lip_task`：每秒仅允许 1 次提交，服务端最多 8 个排队任务
+- `text_to_speech`: at most 1 request per second
+- `submit_system_lip_task`: at most 1 submission per second; server queues up to 8 tasks
 
 ---
 
-## 工具清单
+## Tool Reference
 
-### 用户与账户
+### User & Account
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `get_my_user_detail` | 查询当前用户账号、会员、剩余 K 币、配额等 | 无 |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `get_my_user_detail` | Query current user account, membership, K Coin balance, quotas, etc. | None |
 
-### AI 图片生成
+### AI Image Generation
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `submit_ai_image_task` | 文生图 / 图生图，返回任务 ID | `userPrompt`, `quantity`, `modelsSource` |
-| `get_ai_image_task_detail` | 查询生图任务结果 | `taskId` |
-| `resubmit_ai_image_task` | 按原任务参数重新生成 | `taskId` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `submit_ai_image_task` | Text-to-image / image-to-image; returns task ID | `userPrompt`, `quantity`, `modelsSource` |
+| `get_ai_image_task_detail` | Query image generation task result | `taskId` |
+| `resubmit_ai_image_task` | Regenerate using original task parameters | `taskId` |
 
-**modelsSource 模型代码：**
+**modelsSource model codes:**
 
-| 值 | 模型 |
-|----|------|
+| Value | Model |
+|-------|-------|
 | 2 | google-gemini-2.5-flash-image |
 | 3 | doubao-seedream-4.0 |
 | 5 | google-gemini-3-pro-image |
 | 6 | doubao-seedream-4.5 |
 | 7 | doubao-Seedream-5.0-lite |
 | 8 | google-gemini-3.1-flash-image |
-| 9 | gtp-image-2（推荐优先使用较新模型） |
+| 9 | gtp-image-2 (prefer newer models when available) |
 
-**常用可选参数：** `sizeRatio`（如 `16:9`、`1:1`）、`dpi`（`512`/`1k`/`2k`/`4k`）、`fileUrlList`（参考图）、`width`/`height`（豆包模型 3/6/7 必填）、`webSearch`、`seed`、`thinkingLevel`。
+**Common optional params:** `sizeRatio` (e.g. `16:9`, `1:1`), `dpi` (`512`/`1k`/`2k`/`4k`), `fileUrlList` (reference images), `width`/`height` (required for Doubao models 3/6/7), `webSearch`, `seed`, `thinkingLevel`.
 
-### 广告创意多尺寸
+### Multi-Size Ad Creatives
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `submit_ai_ad_creative_batch_image` | 上传产品图，批量输出多平台尺寸 | `fileUrlList`, `imageSizeList` |
-| `get_ai_ad_creative_batch_image_detail` | 查询批量生图结果 | `taskId` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `submit_ai_ad_creative_batch_image` | Upload product images and batch-generate multiple platform sizes | `fileUrlList`, `imageSizeList` |
+| `get_ai_ad_creative_batch_image_detail` | Query batch generation results | `taskId` |
 
-**layout 布局：** `1`=原图布局，`2`=AI 智能排版，`3`=自定义排版（需 `referenceFileList`）。
+**layout:** `1` = original layout, `2` = AI smart layout, `3` = custom layout (requires `referenceFileList`).
 
-**imageSizeList 示例：**
+**imageSizeList example:**
 
 ```json
 [
@@ -127,16 +127,16 @@ KreadoAI AIGC 能力 MCP 接入文档。本文档基于 MCP 服务 **aigc-agent-
 ]
 ```
 
-### URL 广告图（需先采集页面）
+### URL-Based Ad Images (crawl page first)
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `submit_crawl_task` | 抓取产品页 / 落地页 | `query`（URL） |
-| `get_crawl_task_status` | 查询采集进度与结果 | `threadId` |
-| `submit_url2image_task` | 基于采集结果生成广告图 | `generationMode`, `quantity`, `sizeRatio`, `dpi` |
-| `get_url2image_task_detail` | 查询 URL 广告图任务结果 | `taskId` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `submit_crawl_task` | Crawl product page / landing page | `query` (URL) |
+| `get_crawl_task_status` | Query crawl progress and results | `threadId` |
+| `submit_url2image_task` | Generate ad images from crawl results | `generationMode`, `quantity`, `sizeRatio`, `dpi` |
+| `get_url2image_task_detail` | Query URL ad image task result | `taskId` |
 
-**推荐流程：**
+**Recommended flow:**
 
 ```mermaid
 sequenceDiagram
@@ -145,176 +145,176 @@ sequenceDiagram
 
   Client->>MCP: submit_crawl_task(query, source=2)
   MCP-->>Client: threadId
-  loop 每 10-15 秒
+  loop Every 10-15 seconds
     Client->>MCP: get_crawl_task_status(threadId, includeContent=false)
     MCP-->>Client: status / crawlId
   end
   Client->>MCP: get_crawl_task_status(threadId, includeContent=true)
-  MCP-->>Client: 完整页面数据
+  MCP-->>Client: Full page data
   Client->>MCP: submit_url2image_task(...)
   MCP-->>Client: taskId
-  loop 轮询直至完成
+  loop Poll until complete
     Client->>MCP: get_url2image_task_detail(taskId)
   end
 ```
 
-**generationMode：** `1`=AI 自动生成创意，`2`=参考模板（需 `templateId`）。
+**generationMode:** `1` = AI auto creative, `2` = template-based (requires `templateId`).
 
-**sizeRatio 可选：** `16:9`、`9:16`、`1:1`、`4:3`、`3:4`、`2:3`、`3:2`、`4:5`、`5:4`、`21:9`。
+**sizeRatio options:** `16:9`, `9:16`, `1:1`, `4:3`, `3:4`, `2:3`, `3:2`, `4:5`, `5:4`, `21:9`.
 
-### 图生视频 / 文生视频
+### Image-to-Video / Text-to-Video
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `submit_image_to_video_task` | 提交图生视频或文生视频 | `taskType`, `modelSource`, `pageSource`, `promptWord`, `configOptions` |
-| `batch_get_image_to_video_detail` | 批量查询视频任务（提交后必须轮询） | `taskIds` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `submit_image_to_video_task` | Submit image-to-video or text-to-video task | `taskType`, `modelSource`, `pageSource`, `promptWord`, `configOptions` |
+| `batch_get_image_to_video_detail` | Batch query video tasks (must poll after submit) | `taskIds` |
 
-**关键参数：**
+**Key parameters:**
 
-- `taskType`：`Image To Video`（图生，需主图）或 `Text To Video`（文生，无需主图）
-- `pageSource`：MCP 调用固定传 `I2V`
-- 图生主图：`imageFileId` / `imageUrl` / `imageInput` 三选一
-- `configOptions`：含 `duration`、`resolution`、`ratio`、`usedReference`、`generateAudio` 等；**须与 `modelSource` 枚举及 K 币价表匹配**，否则返回「参数错误」
+- `taskType`: `Image To Video` (requires main image) or `Text To Video` (no main image)
+- `pageSource`: always pass `I2V` for MCP calls
+- Main image (I2V): one of `imageFileId` / `imageUrl` / `imageInput`
+- `configOptions`: includes `duration`, `resolution`, `ratio`, `usedReference`, `generateAudio`, etc.; **must match `modelSource` enums and K Coin price table**, otherwise returns "parameter error"
 
-**configOptions.usedReference：**
+**configOptions.usedReference:**
 
-| 值 | 说明 |
-|----|------|
-| `none` | 单图或无参考 |
-| `first-last` | 首尾帧（需 2 张图） |
-| `reference` | 多参考图（1–9 张） |
-| `multimodal-reference` | 多模态参考（图/视频/音频混合） |
-| `video-continuation` | 视频续写（仅 wan2.7-i2v） |
+| Value | Description |
+|-------|-------------|
+| `none` | Single image or no reference |
+| `first-last` | First and last frame (2 images required) |
+| `reference` | Multiple reference images (1–9) |
+| `multimodal-reference` | Multimodal reference (image/video/audio mix) |
+| `video-continuation` | Video continuation (wan2.7-i2v only) |
 
-**轮询：** `taskStatus=1` 继续等待；`=2` 读取 `videoUrl`；`=3/4` 读取 `errorZhMsg` / `errorEnMsg`。
+**Polling:** `taskStatus=1` keep waiting; `=2` read `videoUrl`; `=3/4` read `errorZhMsg` / `errorEnMsg`.
 
-> 各 `modelSource` 支持的 `ratio`、`resolution`、`duration` 组合较多，详见工具 schema 描述；提交前请确认三元组能通过 K 币价表匹配。
+> Each `modelSource` supports many `ratio` / `resolution` / `duration` combinations. See tool schema for details. Confirm the triple matches the K Coin price table before submitting.
 
-### 数字人视频
+### Digital Human Video
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `get_digital_human_avatar_list` | 分页查询数字人形象 | `cloneDigitalHuman`, `supportTypeId`, `pageIndex`, `pageSize` |
-| `submit_system_lip_task` | 提交唇形合成任务 | `taskName`, `videoRatio`, `digitalHumanId` + 音频 |
-| `get_lip_video_result` | 查询合成结果 | `jobId` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `get_digital_human_avatar_list` | Paginated list of digital human avatars | `cloneDigitalHuman`, `supportTypeId`, `pageIndex`, `pageSize` |
+| `submit_system_lip_task` | Submit lip-sync synthesis task | `taskName`, `videoRatio`, `digitalHumanId` + audio |
+| `get_lip_video_result` | Query synthesis result | `jobId` |
 
-**supportTypeId：** `100`=照片数字人，`101`=视频数字人。
+**supportTypeId:** `100` = photo digital human, `101` = video digital human.
 
-**videoRatio：** `1`=16:9，`2`=9:16。
+**videoRatio:** `1` = 16:9, `2` = 9:16.
 
-**音频来源：** 可先调用 `text_to_speech` 获得 `audioUrl` / `audioId`，再传入 `submit_system_lip_task`。
+**Audio source:** call `text_to_speech` first to obtain `audioUrl` / `audioId`, then pass to `submit_system_lip_task`.
 
-### 文本转语音（TTS）
+### Text-to-Speech (TTS)
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `get_voice_language_list` | 获取支持语种列表 | 无 |
-| `get_voice_list` | 分页查询音色 | `language`, `pageIndex`, `pageSize`, `voiceClone` |
-| `text_to_speech` | 文本合成 MP3 | `languageId`, `content`, `voiceId`, `voiceClone`, `voiceSource` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `get_voice_language_list` | List supported languages | None |
+| `get_voice_list` | Paginated voice list | `language`, `pageIndex`, `pageSize`, `voiceClone` |
+| `text_to_speech` | Synthesize text to MP3 | `languageId`, `content`, `voiceId`, `voiceClone`, `voiceSource` |
 
-**voiceSource：** `1`=微软，`3`=阿里，`4`=字节，`5`=minimax，`6`=谷歌，`21`=ElevenLabs。
+**voiceSource:** `1` = Microsoft, `3` = Alibaba, `4` = ByteDance, `5` = minimax, `6` = Google, `21` = ElevenLabs.
 
-### 视频字幕 / 水印擦除
+### Subtitle / Watermark Removal
 
-| 工具 | 说明 | 必填参数 |
-|------|------|----------|
-| `submit_subtitle_removal_task` | 提交擦除任务 | `taskName`, `srcFileUrl` |
-| `get_subtitle_removal_result` | 查询擦除结果 | `jobId` |
+| Tool | Description | Required params |
+|------|-------------|-----------------|
+| `submit_subtitle_removal_task` | Submit removal task | `taskName`, `srcFileUrl` |
+| `get_subtitle_removal_result` | Query removal result | `jobId` |
 
-**区域坐标：** `rectAreaList`（字幕框）、`customRectAreaList`（水印），每项含 `lt_x`、`lt_y`、`rb_x`、`rb_y`。
+**Region coordinates:** `rectAreaList` (subtitle boxes), `customRectAreaList` (watermarks); each item has `lt_x`, `lt_y`, `rb_x`, `rb_y`.
 
 ---
 
-## 典型接入流程
+## Typical Integration Flows
 
-### 1. 文生图
-
-```
-get_my_user_detail                    → 确认 K 币余额
-submit_ai_image_task                  → 获得 taskId
-get_ai_image_task_detail (轮询)       → status=3 时读取图片 URL
-```
-
-### 2. 产品图多尺寸广告素材
+### 1. Text-to-Image
 
 ```
-submit_ai_ad_creative_batch_image     → 传入产品图 + 尺寸列表
-get_ai_ad_creative_batch_image_detail → 轮询直至成功
+get_my_user_detail                    → Confirm K Coin balance
+submit_ai_image_task                  → Get taskId
+get_ai_image_task_detail (poll)       → Read image URLs when status=3
 ```
 
-### 3. 商品页 URL 生成广告图
+### 2. Multi-Size Ad Creatives from Product Images
+
+```
+submit_ai_ad_creative_batch_image     → Pass product images + size list
+get_ai_ad_creative_batch_image_detail   → Poll until success
+```
+
+### 3. Ad Images from Product Page URL
 
 ```
 submit_crawl_task (source=2)
-get_crawl_task_status (轮询)
+get_crawl_task_status (poll)
 submit_url2image_task
-get_url2image_task_detail (轮询)
+get_url2image_task_detail (poll)
 ```
 
-### 4. 图生视频
+### 4. Image-to-Video
 
 ```
-submit_image_to_video_task            → pageSource=I2V，传入主图与 configOptions
-batch_get_image_to_video_detail       → 每 10-30 秒轮询 taskIds
+submit_image_to_video_task            → pageSource=I2V, pass main image + configOptions
+batch_get_image_to_video_detail       → Poll taskIds every 10-30 seconds
 ```
 
-### 5. 数字人口播视频
+### 5. Digital Human Spokesperson Video
 
 ```
-get_digital_human_avatar_list         → 选择 digitalHumanId
+get_digital_human_avatar_list         → Choose digitalHumanId
 get_voice_language_list
 get_voice_list
-text_to_speech                        → 获得 audioUrl / audioId
+text_to_speech                        → Get audioUrl / audioId
 submit_system_lip_task
-get_lip_video_result (轮询)
+get_lip_video_result (poll)
 ```
 
 ---
 
-## 调用示例（Cursor Agent）
+## Usage Examples (Cursor Agent)
 
-在已配置 MCP 的前提下，可直接用自然语言驱动 Agent 调用工具，例如：
+With MCP configured, you can drive the Agent with natural language, for example:
 
-- 「用 gtp-image-2 生成一张 16:9 的电商主图，提示词：…」
-- 「抓取 https://example.com/product 并生成 4 张 1:1 广告图」
-- 「用 Doubao 模型把这张图做成 5 秒 9:16 图生视频」
-- 「查一下我的 K 币余额，然后用中文女声合成一段口播并生成数字人视频」
+- "Generate a 16:9 e-commerce hero image with gtp-image-2, prompt: …"
+- "Crawl https://example.com/product and generate 4 square ad images"
+- "Turn this image into a 5-second 9:16 image-to-video with the Doubao model"
+- "Check my K Coin balance, then synthesize a Chinese female voiceover and create a digital human video"
 
-Agent 会自动选择对应的 `submit_*` 与 `get_*` 工具并按轮询规则等待结果。
-
----
-
-## 注意事项
-
-1. **任务归属**：`resubmit_ai_image_task` 等操作仅允许重新生成当前会话用户自己的任务。
-2. **采集轮询**：`get_crawl_task_status` 轮询阶段建议 `includeContent=false`，SUCCESS 后再设 `true` 获取完整数据，避免大体积响应解析失败。
-3. **视频参数**：`modelSource` + `duration` + `resolution` 须同时满足模型枚举与 K 币价表；常见失败如 Kling:3.0-Omni + `usedReference=none`、Doubao-seedance-fast-2 + 1080P。
-4. **文件 URL**：字幕擦除等场景的 `srcFileUrl` 不可含中文或特殊字符。
-5. **工具同步**：本文档随 MCP 工具 schema 编写；若服务端升级导致字段变化，以 MCP 客户端实际工具定义为准。
+The Agent will select the appropriate `submit_*` and `get_*` tools and poll according to the rules above.
 
 ---
 
-## 工具总览（20 个）
+## Notes
 
-| # | 工具名 | 分类 |
-|---|--------|------|
-| 1 | `get_my_user_detail` | 账户 |
-| 2 | `submit_ai_image_task` | AI 生图 |
-| 3 | `get_ai_image_task_detail` | AI 生图 |
-| 4 | `resubmit_ai_image_task` | AI 生图 |
-| 5 | `submit_ai_ad_creative_batch_image` | 广告多尺寸 |
-| 6 | `get_ai_ad_creative_batch_image_detail` | 广告多尺寸 |
-| 7 | `submit_crawl_task` | URL 广告图 |
-| 8 | `get_crawl_task_status` | URL 广告图 |
-| 9 | `submit_url2image_task` | URL 广告图 |
-| 10 | `get_url2image_task_detail` | URL 广告图 |
-| 11 | `submit_image_to_video_task` | 视频生成 |
-| 12 | `batch_get_image_to_video_detail` | 视频生成 |
-| 13 | `get_digital_human_avatar_list` | 数字人 |
-| 14 | `submit_system_lip_task` | 数字人 |
-| 15 | `get_lip_video_result` | 数字人 |
+1. **Task ownership:** Operations such as `resubmit_ai_image_task` only apply to tasks owned by the current session user.
+2. **Crawl polling:** During polling, use `includeContent=false` in `get_crawl_task_status`; set `true` after SUCCESS to fetch full data and avoid large-response parse failures.
+3. **Video parameters:** `modelSource` + `duration` + `resolution` must satisfy both model enums and the K Coin price table. Common failures: Kling:3.0-Omni + `usedReference=none`, Doubao-seedance-fast-2 + 1080P.
+4. **File URLs:** `srcFileUrl` for subtitle removal must not contain Chinese characters or special characters.
+5. **Tool sync:** This document follows the current MCP tool schemas. If the server upgrades and fields change, rely on the tool definitions synced by your MCP client.
+
+---
+
+## Tool Index (20 tools)
+
+| # | Tool | Category |
+|---|------|----------|
+| 1 | `get_my_user_detail` | Account |
+| 2 | `submit_ai_image_task` | AI image |
+| 3 | `get_ai_image_task_detail` | AI image |
+| 4 | `resubmit_ai_image_task` | AI image |
+| 5 | `submit_ai_ad_creative_batch_image` | Multi-size ads |
+| 6 | `get_ai_ad_creative_batch_image_detail` | Multi-size ads |
+| 7 | `submit_crawl_task` | URL ad images |
+| 8 | `get_crawl_task_status` | URL ad images |
+| 9 | `submit_url2image_task` | URL ad images |
+| 10 | `get_url2image_task_detail` | URL ad images |
+| 11 | `submit_image_to_video_task` | Video |
+| 12 | `batch_get_image_to_video_detail` | Video |
+| 13 | `get_digital_human_avatar_list` | Digital human |
+| 14 | `submit_system_lip_task` | Digital human |
+| 15 | `get_lip_video_result` | Digital human |
 | 16 | `get_voice_language_list` | TTS |
 | 17 | `get_voice_list` | TTS |
 | 18 | `text_to_speech` | TTS |
-| 19 | `submit_subtitle_removal_task` | 字幕擦除 |
-| 20 | `get_subtitle_removal_result` | 字幕擦除 |
+| 19 | `submit_subtitle_removal_task` | Subtitle removal |
+| 20 | `get_subtitle_removal_result` | Subtitle removal |
